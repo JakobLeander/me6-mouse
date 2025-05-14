@@ -15,10 +15,10 @@
 
   The commands are in the format a character followed by a single digit:
 
-  The commands must be wrapped by {} to reduce risk of corrupted commands
-  - '{D#}' = Drive 1 second, 1 = max backward, 5 = stop, 9 = max forward
-  - '{T#}' = Turn, e.g. R0 = straight, R9 = turn maximum right
-  - '{S#}' = Play sound, value does not matter
+  The commands must be wrapped by () to reduce risk of corrupted commands
+  - '(D#)' = Drive 1 second, 1 = max backward, 5 = stop, 9 = max forward
+  - '(T#)' = Turn, e.g. R0 = straight, R9 = turn maximum right
+  - '(S#)' = Play sound, value does not matter
 
   You could also add a checksum to the command to further reduce risk of corrupted
   messages as serial communication over bluetooth is not 100% reliable
@@ -37,6 +37,7 @@
 #define TX_PIN 3        // Pin that is connected to HC-06 RX pin
 #define IN1_PIN 5       // Pin connected to the motor driver IN1
 #define IN2_PIN 6       // Pin connected to the motor driver IN1
+#define SERVO_PIN 9     // Pin on control signal to servo
 #define DFPLAYER_PIN 10 // Pin that is connected to the DFPlayer IO_2 port
 
 // Bluetooth commands
@@ -52,11 +53,11 @@ unsigned long g_lastDriveRequest; // Last time a drive request was received
 
 // Constants
 const int MIN_MOTOR_SPEED = 120; // Does not work if too low
-const int MAX_MOTOR_SPEED = 255;
+const int MAX_MOTOR_SPEED = 230;
 const int MIN_SERVO_ANGLE = 60;                // Full left
 const int MAX_SERVO_ANGLE = 120;               // Full right
 const unsigned long MOTOR_RUN_TIME = 1000;     // Number of miliseconds to run the motor on each request
-const unsigned long DFPLAYER_PRESS_TIME = 250; // Number of miliseconds to ground the pin for playing sound
+const unsigned long DFPLAYER_PRESS_TIME = 500; // Number of miliseconds to ground the pin for playing sound
 
 // Setup ME6
 void setup()
@@ -64,13 +65,17 @@ void setup()
   Serial.begin(9600);
   g_bluetoothSerial.begin(9600);
   g_lastDriveRequest = millis();
+  g_servo.attach(SERVO_PIN, 1000, 2000); // Define servo range
   Drive(5); // Stop motors
   Turn(5); // Center steering
   digitalWrite(DFPLAYER_PIN, LOW);
   delay(1000); // Keep the pin low for a while to increase volume
   pinMode(DFPLAYER_PIN, INPUT);
+  delay(DFPLAYER_PRESS_TIME);
   PlaySound();
   Serial.println("ME6 is ready");
+  g_bluetoothSerial.write("ME6 is ready");
+
 }
 
 // Main loop
@@ -124,17 +129,17 @@ void loop()
  */
 void ReadBluetoothCommand(byte &action, byte &actionValue)
 {
-  const char startMarker = '{'; // 123
-  const char endMarker = '}';   // 125
+  const char startMarker = '(';
+  const char endMarker = ')';
   const byte bufferLength = 2;
   char c;
   static byte index = 0;
   static boolean recieveInProgress = false;
   static char buffer[bufferLength];
-
+  
   action = ACTION_NOTHING;
   actionValue = 0;
-
+  
   if (g_bluetoothSerial.available())
   {
     c = g_bluetoothSerial.read();
@@ -155,7 +160,7 @@ void ReadBluetoothCommand(byte &action, byte &actionValue)
         recieveInProgress = false;
         index = 0;
         action = buffer[0];
-        actionValue = buffer[1];
+        actionValue = buffer[1] - '0';
       }
       else
       {
@@ -192,6 +197,7 @@ void Drive(byte speed)
   if (speed > 5)
   {
     motorSpeed = map(speed, 6, 9, MIN_MOTOR_SPEED, MAX_MOTOR_SPEED);
+    Serial.println("Forward: " + String(motorSpeed));
     digitalWrite(IN1_PIN, LOW);
     analogWrite(IN2_PIN, motorSpeed);
     return;
@@ -201,6 +207,7 @@ void Drive(byte speed)
   if (speed < 5)
   {
     motorSpeed = map(speed, 1, 4, MAX_MOTOR_SPEED, MIN_MOTOR_SPEED);
+    Serial.println("Backward: " + String(motorSpeed));
     digitalWrite(IN2_PIN, LOW);
     analogWrite(IN1_PIN, motorSpeed);
     return;
@@ -215,6 +222,7 @@ void Drive(byte speed)
  */
 void Turn(byte direction)
 {
+  Serial.println("direction: " + String(direction));
   direction = constrain(direction, 1, 9);
   int servoAngle = map(direction, 1, 9, MIN_SERVO_ANGLE, MAX_SERVO_ANGLE);
   g_servo.write(servoAngle);
@@ -231,5 +239,6 @@ void PlaySound()
   pinMode(DFPLAYER_PIN, OUTPUT);
   digitalWrite(DFPLAYER_PIN, LOW);
   delay(DFPLAYER_PRESS_TIME);
+  pinMode(DFPLAYER_PIN, INPUT);
   Serial.println("Play Sound");
 }
